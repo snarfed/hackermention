@@ -5,7 +5,7 @@ import urllib.parse
 
 from flask import abort, Flask, request
 from granary import microformats2
-from oauth_dropins.webutil import appengine_info, flask_util, util
+from oauth_dropins.webutil import appengine_info, flask_util, util, webmention
 from oauth_dropins.webutil.appengine_config import ndb_client
 
 from models import Config, Webmention
@@ -28,42 +28,79 @@ app.register_error_handler(Exception, flask_util.handle_exception)
 app.wsgi_app = flask_util.ndb_context_middleware(app.wsgi_app, client=ndb_client)
 
 
+def get_item(id):
+    resp = util.requests_get(HN_ITEM % id).json()
+    if resp.get('error') or resp.get('dead'):
+        logging.info(f'{id}: {resp}')
+        return None
+
+    return resp
+
+
+def item_url(id):
+    return urllib.parse.urljoin(request.url, f'/item/{id}')
+
+
 @app.route('/_ah/process')
 def process():
-    config = Config.query().get()
-    id = config.last_id + 1
+    # config = Config.query().get()
+    # id = config.last_id + 1
+    id = 28
 
-    while True:
-        item = util.requests_get(HN_ITEM % id).json()
-        id += 1
+    for id in range(28, 1000):
+        item = get_item(id)
+        logging.info(f'{id}: {item}')
+        if not item or item['type'] != 'comment':
+            continue
+
+        comment = item
+        while item and item['type'] == 'comment':
+            item = get_item(item['parent'])
+
+        if not item:
+            continue
+
+        logging.info(f'top level item {item["id"]} {item["type"]}')
+        if item['type'] != 'story':
+            continue
+
+        endpoint, resp = webmention.discover(item['url'])
+        if endpoint:
+            source = item_url(id)
+            logging.info(f'Sending webmention, {source} => {resp.url}')
+            # TODO: catch HTTP errors
+            webmention.send(endpoint, source, resp.url)
+        else:
+            logging.info('No webmention endpoint')
+
+    return ''
 
 
 @app.route('/item/<id>')
 def item(id):
-    comment = util.requests_get(HN_ITEM % id).json()
+    target = request.values['target']
+
+    comment = get_item(id)
     if not comment:
-        return 'No such item', 404
+        return 'No such item, or error', 404
+    elif comment['type'] != 'comment':
+        return f'{comment["type"]} items not yet supported', 400
 
-    assert comment['type'] == 'comment'
     comment_url = item_url(comment['id'])
-
-    item = comment
-    while item['type'] == 'comment':
-        item = util.requests_get(HN_ITEM % item['parent']).json()
 
     html = microformats2.object_to_html({
         'objectType': 'comment',
         'id': f'tag:news.ycombinator.com:{id}',
         'url': comment_url,
         'content': comment['text'],
-        'published': util.maybe_timestamp_to_iso8601(item['time']),
+        'published': util.maybe_timestamp_to_iso8601(comment['time']),
         'author': {
             'displayName': comment['by'],
             'url': HN_USER % comment['by'],
         },
         'inReplyTo': [
             {'url': item_url(comment['parent'])},
-            {'url': item['url']},
+            {'url': target},
         ],
     })
     return f"""\
@@ -78,10 +115,6 @@ def item(id):
 </body>
 </html>
 """
-
-
-def item_url(id):
-    return urllib.parse.urljoin(request.url, f'/item/{id}')
 
 
 @app.route('/_ah/<any(start, stop, warmup):_>')
