@@ -17,6 +17,14 @@ inbound_services:
 - warmup
 
 handlers:
+- url: /
+  static_files: static/index.html
+  upload: static/index.html
+
+- url: /robots.txt
+  static_files: static/robots.txt
+  upload: static/robots.txt
+
 - url: .*
   script: auto
   secure: always

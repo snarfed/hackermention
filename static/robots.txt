@@ -1,0 +1,6 @@
+User-agent: *
+Disallow: /item/*
+Disallow: /*?*
+
+User-agent: FemtosearchBot
+Disallow: *
