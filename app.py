@@ -1,7 +1,4 @@
 """Request handlers.
-
-TODO:
-cache connection failures, use webutil
 """
 import logging
 import urllib.parse
@@ -47,16 +44,16 @@ def item_url(id):
 
 @app.route('/_ah/process')
 def process():
-    # config = Config.query().get()
-    # id = config.last_id + 1
-    id = 367
+    config = Config.query().get()
+    id = config.last_id
+    # id = 1102
 
     try:
         while True:
             _process_one(id)
             id += 1
-    except:# DeadlineExceededError:
-        logging.info('died', exc_info=True)
+    except:
+        logging.info('died!', exc_info=True)
         config.last_id = id
         config.put()
         return ''
@@ -88,7 +85,11 @@ def _process_one(id):
     try:
         endpoint, resp = webmention.discover(url, cache=True)
     except (ValueError, RequestException):
-        logging.info('endpoint discovery failed', exc_info=True)
+        cache_key = webmention.endpoint_cache_key(url)
+        logging.info(f'endpoint discovery failed, caching NONE for {cache_key}',
+                     exc_info=True)
+        with webmention.endpoint_cache_lock:
+            webmention.endpoint_cache[cache_key] = webmention.NO_ENDPOINT
         return
 
     if endpoint in (None, webmention.NO_ENDPOINT):
