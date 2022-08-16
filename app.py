@@ -1,22 +1,25 @@
 """Request handlers.
+
+TODO:
+cache connection failures, use webutil
 """
 import logging
 import urllib.parse
 
 from flask import abort, Flask, request
+# from google.appengine.runtime import DeadlineExceededError
 from granary import microformats2
 from oauth_dropins.webutil import appengine_info, flask_util, util, webmention
 from oauth_dropins.webutil.appengine_config import ndb_client
-from requests.exception import RequestException
+from requests.exceptions import RequestException
 
-from models import Config, Webmention
-
-logger = logging.getLogger(__name__)
-util.set_user_agent('hackermention <https://hackermention.appspot.com/>')
+from models import Config, Domain, Webmention
 
 HN_BASE = 'https://hacker-news.firebaseio.com/v0'
 HN_ITEM = f'{HN_BASE}/item/%s.json'
 HN_USER = 'https://news.ycombinator.com/user?id=%s'
+
+util.set_user_agent('hackermention <https://hackermention.appspot.com/>')
 
 # Flask app
 app = Flask(__name__)
@@ -46,49 +49,73 @@ def item_url(id):
 def process():
     # config = Config.query().get()
     # id = config.last_id + 1
-    id = 28
+    id = 367
 
-    for id in range(28, 1000):
-        item = get_item(id)
-        logging.info(f'{id}: {item}')
-        if not item or item['type'] != 'comment':
-            continue
+    try:
+        while True:
+            _process_one(id)
+            id += 1
+    except:# DeadlineExceededError:
+        logging.info('died', exc_info=True)
+        config.last_id = id
+        config.put()
+        return ''
 
-        comment = item
-        while item and item['type'] == 'comment':
-            item = get_item(item['parent'])
 
-        if not item:
-            continue
+def _process_one(id):
+    item = get_item(id)
+    if not item:
+        return
 
-        logging.info(f'top level item {item["id"]} {item["type"]}')
-        if item['type'] != 'story':
-            continue
+    item.pop('kids', None)
+    logging.info(f'{id}: {item}')
+    if item.get('type') != 'comment':
+        return
 
-        try:
-            endpoint, resp = webmention.discover(item['url'])
-        except ValueError, RequestException:
-            logging.info('endpoint discovery failed', exc_info=True)
+    comment = item
+    while item and item.get('type') == 'comment':
+        item = get_item(item['parent'])
 
-        if not endpoint:
-            logging.info('No webmention endpoint')
-            continue
+    if not item:
+        return
 
-        source = item_url(id)
-        logging.info(f'Sending webmention, {source} => {resp.url}')
-        wm = Webmention(id=f'{source} {target}', comment_id=id, story_id=item['id'])
-        wm.put()
+    item.pop('kids', None)
+    logging.info(f'top level item {item["id"]} {item}')
+    url = item.get('url')
+    if item.get('type') != 'story' or not url:
+        return
 
-        try:
-            webmention.send(endpoint, source, resp.url)
-        except ValueError, RequestException:
-            logging.info('send failed', exc_info=True)
-            continue
+    try:
+        endpoint, resp = webmention.discover(url, cache=True)
+    except (ValueError, RequestException):
+        logging.info('endpoint discovery failed', exc_info=True)
+        return
 
-        wm.status = 'complete'
-        wm.put()
+    if endpoint in (None, webmention.NO_ENDPOINT):
+        logging.info('No webmention endpoint')
+        return
 
-    return ''
+    source = item_url(id)
+    target = resp.url
+    domain_str = util.domain_from_link(target)
+
+    logging.info(f'Storing Domain {domain_str} {endpoint}')
+    domain = Domain.get_or_insert(domain_str)
+    domain.endpoint = endpoint
+    domain.put()
+
+    logging.info(f'Sending webmention, {source} => {target}')
+    wm = Webmention.get_or_insert(f'{source} {target}', comment_id=id,
+                                  story_id=item['id'])
+
+    try:
+        webmention.send(endpoint, source, target)
+    except (ValueError, RequestException):
+        logging.info('send failed', exc_info=True)
+        return
+
+    wm.status = 'complete'
+    wm.put()
 
 
 @app.route('/item/<id>')
