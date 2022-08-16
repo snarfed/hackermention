@@ -1,0 +1,6 @@
+git+https://github.com/snarfed/oauth-dropins.git#egg=oauth_dropins
+git+https://github.com/snarfed/granary.git#egg=granary
+
+Flask<3.0.0
+google-cloud-ndb
+gunicorn
