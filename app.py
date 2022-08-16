@@ -12,8 +12,9 @@ from requests.exceptions import RequestException
 
 from models import Config, Domain, Webmention
 
-HN_BASE = 'https://hacker-news.firebaseio.com/v0'
-HN_ITEM = f'{HN_BASE}/item/%s.json'
+API_BASE = 'https://hacker-news.firebaseio.com/v0'
+API_ITEM = f'{API_BASE}/item/%s.json'
+HN_ITEM = 'https://news.ycombinator.com/item?id=%s'
 HN_USER = 'https://news.ycombinator.com/user?id=%s'
 
 util.set_user_agent('hackermention <https://hackermention.appspot.com/>')
@@ -30,7 +31,7 @@ app.wsgi_app = flask_util.ndb_context_middleware(app.wsgi_app, client=ndb_client
 
 
 def get_item(id):
-    resp = util.requests_get(HN_ITEM % id).json()
+    resp = util.requests_get(API_ITEM % id).json()
     if resp.get('error') or resp.get('dead'):
         logging.info(f'{id}: {resp}')
         return None
@@ -38,15 +39,15 @@ def get_item(id):
     return resp
 
 
-def item_url(id):
-    return urllib.parse.urljoin(request.url, f'/item/{id}')
+def source_url(comment_id, story_id):
+    return urllib.parse.urljoin(request.url, f'/item/{comment_id}?story={story_id}')
 
 
 @app.route('/_ah/process')
 def process():
     config = Config.query().get()
     id = config.last_id
-    # id = 1102
+    # id = 1251
 
     try:
         while True:
@@ -96,7 +97,7 @@ def _process_one(id):
         logging.info('No webmention endpoint')
         return
 
-    source = item_url(id)
+    source = source_url(id, item['id'])
     target = resp.url
     domain_str = util.domain_from_link(target)
 
@@ -110,10 +111,13 @@ def _process_one(id):
                                   story_id=item['id'])
 
     try:
-        webmention.send(endpoint, source, target)
+        resp = webmention.send(endpoint, source, target)
     except (ValueError, RequestException):
         logging.info('send failed', exc_info=True)
         return
+
+    if resp.status_code == 201:
+        logging.info(resp.headers.get('Location'))
 
     wm.status = 'complete'
     wm.put()
@@ -121,15 +125,18 @@ def _process_one(id):
 
 @app.route('/item/<id>')
 def item(id):
-    target = request.values['target']
-
     comment = get_item(id)
     if not comment:
         return 'No such item, or error', 404
     elif comment['type'] != 'comment':
         return f'{comment["type"]} items not yet supported', 400
 
-    comment_url = item_url(comment['id'])
+    comment_url = HN_ITEM % comment['id']
+
+    story_id = request.values['story']
+    story = get_item(story_id)
+    if not story:
+        return 'No such story id', 404
 
     html = microformats2.object_to_html({
         'objectType': 'comment',
@@ -142,8 +149,10 @@ def item(id):
             'url': HN_USER % comment['by'],
         },
         'inReplyTo': [
-            {'url': item_url(comment['parent'])},
-            {'url': target},
+            {'url': source_url(comment['parent'])},
+            {'url': HN_ITEM % comment['parent']},
+            {'url': HN_ITEM % story_id},
+            {'url': story.get('url')},
         ],
     })
     return f"""\
