@@ -20,3 +20,4 @@ class Webmention(StringIdModel):
     story_id = ndb.IntegerProperty(required=True)
     created = ndb.DateTimeProperty(auto_now_add=True, required=True, tzinfo=timezone.utc)
     updated = ndb.DateTimeProperty(auto_now=True, tzinfo=timezone.utc)
+    status = ndb.StringProperty(choices=('complete','failed'))

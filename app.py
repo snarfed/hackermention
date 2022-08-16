@@ -7,6 +7,7 @@ from flask import abort, Flask, request
 from granary import microformats2
 from oauth_dropins.webutil import appengine_info, flask_util, util, webmention
 from oauth_dropins.webutil.appengine_config import ndb_client
+from requests.exception import RequestException
 
 from models import Config, Webmention
 
@@ -64,14 +65,28 @@ def process():
         if item['type'] != 'story':
             continue
 
-        endpoint, resp = webmention.discover(item['url'])
-        if endpoint:
-            source = item_url(id)
-            logging.info(f'Sending webmention, {source} => {resp.url}')
-            # TODO: catch HTTP errors
-            webmention.send(endpoint, source, resp.url)
-        else:
+        try:
+            endpoint, resp = webmention.discover(item['url'])
+        except ValueError, RequestException:
+            logging.info('endpoint discovery failed', exc_info=True)
+
+        if not endpoint:
             logging.info('No webmention endpoint')
+            continue
+
+        source = item_url(id)
+        logging.info(f'Sending webmention, {source} => {resp.url}')
+        wm = Webmention(id=f'{source} {target}', comment_id=id, story_id=item['id'])
+        wm.put()
+
+        try:
+            webmention.send(endpoint, source, resp.url)
+        except ValueError, RequestException:
+            logging.info('send failed', exc_info=True)
+            continue
+
+        wm.status = 'complete'
+        wm.put()
 
     return ''
 
