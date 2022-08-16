@@ -16,6 +16,8 @@ class Config(ndb.Model):
 class Webmention(StringIdModel):
     """Key id is '[source URL] [target URL]'.
     """
+    source = ndb.StringProperty(required=True)
+    target = ndb.StringProperty(required=True)
     created = ndb.DateTimeProperty(auto_now_add=True, required=True, tzinfo=timezone.utc)
     updated = ndb.DateTimeProperty(auto_now=True, tzinfo=timezone.utc)
     comment_id = ndb.IntegerProperty(required=True)
@@ -28,3 +30,9 @@ class Domain(StringIdModel):
     created = ndb.DateTimeProperty(auto_now_add=True, required=True, tzinfo=timezone.utc)
     updated = ndb.DateTimeProperty(auto_now=True, tzinfo=timezone.utc)
     endpoint = ndb.StringProperty()
+
+
+class Item(ndb.Model):
+    json = ndb.TextProperty(required=True)
+
+

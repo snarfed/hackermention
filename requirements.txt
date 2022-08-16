@@ -2,5 +2,6 @@ git+https://github.com/snarfed/granary.git#egg=granary
 git+https://github.com/snarfed/oauth-dropins.git@webmention-cache#egg=oauth_dropins
 
 Flask<3.0.0
+flask_caching
 google-cloud-ndb
 gunicorn

@@ -1,16 +1,24 @@
-"""Request handlers.
 """
+TODO:
+cache:
+* comment id => top level id
+* top level id => url?
+follow redirects on target URLs before sending wms?
+"""
+import datetime
 import logging
 import urllib.parse
 
 from flask import abort, Flask, request
+from flask_caching import Cache
 # from google.appengine.runtime import DeadlineExceededError
 from granary import microformats2
 from oauth_dropins.webutil import appengine_info, flask_util, util, webmention
 from oauth_dropins.webutil.appengine_config import ndb_client
+from oauth_dropins.webutil.util import json_dumps, json_loads
 from requests.exceptions import RequestException
 
-from models import Config, Domain, Webmention
+from models import Config, Domain, Item, Webmention
 
 API_BASE = 'https://hacker-news.firebaseio.com/v0'
 API_ITEM = f'{API_BASE}/item/%s.json'
@@ -23,11 +31,15 @@ util.set_user_agent('hackermention <https://hackermention.appspot.com/>')
 app = Flask(__name__)
 app.template_folder = './templates'
 app.json.compact = False
-app.config['ENV'] = 'development' if appengine_info.DEBUG else 'production'
+app.config.update({
+    'ENV': 'development' if appengine_info.DEBUG else 'production',
+    'CACHE_TYPE': 'SimpleCache',
+})
 app.after_request(flask_util.default_modern_headers)
 app.register_error_handler(Exception, flask_util.handle_exception)
 
 app.wsgi_app = flask_util.ndb_context_middleware(app.wsgi_app, client=ndb_client)
+cache = Cache(app)
 
 
 def get_item(id):
@@ -64,6 +76,8 @@ def _process_one(id):
     item = get_item(id)
     if not item:
         return
+
+    Item(id=id, json=json_dumps(item)).put()
 
     item.pop('kids', None)
     logging.info(f'{id}: {item}')
@@ -107,8 +121,9 @@ def _process_one(id):
     domain.put()
 
     logging.info(f'Sending webmention, {source} => {target}')
-    wm = Webmention.get_or_insert(f'{source} {target}', comment_id=id,
-                                  story_id=item['id'])
+    wm = Webmention.get_or_insert(
+        f'{source} {target}', source=source, target=target, comment_id=id,
+        story_id=item['id'])
 
     try:
         resp = webmention.send(endpoint, source, target)
@@ -124,6 +139,7 @@ def _process_one(id):
 
 
 @app.route('/item/<id>')
+@flask_util.cached(cache, datetime.timedelta(hours=1))
 def item(id):
     comment = get_item(id)
     if not comment:
@@ -149,7 +165,7 @@ def item(id):
             'url': HN_USER % comment['by'],
         },
         'inReplyTo': [
-            {'url': source_url(comment['parent'])},
+            {'url': source_url(comment['parent'], story_id)},
             {'url': HN_ITEM % comment['parent']},
             {'url': HN_ITEM % story_id},
             {'url': story.get('url')},
