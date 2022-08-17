@@ -5,9 +5,8 @@ cache:
 * top level id => url?
 follow redirects on target URLs before sending wms?
 """
-import datetime
+from datetime import datetime, timedelta
 import logging
-import signal
 import urllib.parse
 
 from cachetools import TTLCache
@@ -21,6 +20,7 @@ from requests.exceptions import RequestException
 
 from models import Config, Domain, Item, Webmention
 
+DEADLINE = timedelta(minutes=9)
 API_BASE = 'https://hacker-news.firebaseio.com/v0'
 API_ITEM = f'{API_BASE}/item/%s.json'
 HN_ITEM = 'https://news.ycombinator.com/item?id=%s'
@@ -61,19 +61,19 @@ def source_url(comment_id, story_id):
 
 @app.route('/_ah/process')
 def process():
-    # config = Config.query().get()
-    # id = config.last_id
-    id = 1251
+    start = datetime.now()
 
-    def cleanup():
-        logging.info('terminated!', exc_info=True)
-        config.last_id = id
-        config.put()
-        return ''
-
-    signal.signal(signal.SIGTERM, cleanup)
+    config = Config.query().get()
+    id = config.last_id
+    # id = 1251
 
     while True:
+        if datetime.now() - start > DEADLINE:
+            logging.info(f'hit {DEADLINE} deadline, shutting down')
+            config.last_id = id
+            config.put()
+            return ''
+
         _process_one(id)
         id += 1
 
@@ -149,7 +149,7 @@ def _process_one(id):
 
 
 @app.route('/item/<id>')
-@flask_util.cached(cache, datetime.timedelta(hours=1))
+@flask_util.cached(cache, timedelta(hours=1))
 def item(id):
     comment = get_item(id)
     if not comment:
