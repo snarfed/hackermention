@@ -12,7 +12,7 @@ from flask_caching import Cache
 from granary import microformats2
 from oauth_dropins.webutil import appengine_info, flask_util, util, webmention
 from oauth_dropins.webutil.appengine_config import ndb_client, tasks_client
-from oauth_dropins.webutil.appengine_info import APP_ID
+from oauth_dropins.webutil.appengine_info import APP_ID, LOCAL
 from oauth_dropins.webutil.util import json_dumps, json_loads
 from requests.exceptions import RequestException
 
@@ -55,7 +55,8 @@ def get_item(id):
 
 
 def source_url(comment_id, story_id):
-    return urllib.parse.urljoin(request.url, f'/item/{comment_id}?story={story_id}')
+    base = request.host_url if LOCAL else 'https://hackermention.appspot.com/'
+    return urllib.parse.urljoin(base, f'/item/{comment_id}?story={story_id}')
 
 
 @app.route('/_ah/process', methods=['POST'])
@@ -64,7 +65,7 @@ def process():
 
     config = Config.query().get()
     id = config.last_id
-    # id = 3277
+    # id = 9485
 
     while True:
         if datetime.now() - start > DEADLINE:
@@ -73,7 +74,7 @@ def process():
             config.put()
 
             tasks_client.create_task(
-                parent=tasks_client.queue_path(APP_ID, 'us-central', 'default'),
+                parent=tasks_client.queue_path(APP_ID, 'us-central1', 'default'),
                 task={
                     'app_engine_http_request': {
                         'http_method': 'POST',
