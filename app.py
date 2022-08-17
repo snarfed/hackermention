@@ -9,9 +9,9 @@ import datetime
 import logging
 import urllib.parse
 
+from cachetools import TTLCache
 from flask import abort, Flask, request
 from flask_caching import Cache
-# from google.appengine.runtime import DeadlineExceededError
 from granary import microformats2
 from oauth_dropins.webutil import appengine_info, flask_util, util, webmention
 from oauth_dropins.webutil.appengine_config import ndb_client
@@ -24,6 +24,9 @@ API_BASE = 'https://hacker-news.firebaseio.com/v0'
 API_ITEM = f'{API_BASE}/item/%s.json'
 HN_ITEM = 'https://news.ycombinator.com/item?id=%s'
 HN_USER = 'https://news.ycombinator.com/user?id=%s'
+
+top_level_cache = TTLCache(1_000_000, 60 * 60 * 24 * 365)  # 1y expiration
+NONE = 0
 
 util.set_user_agent('hackermention <https://hackermention.appspot.com/>')
 
@@ -57,9 +60,9 @@ def source_url(comment_id, story_id):
 
 @app.route('/_ah/process')
 def process():
-    config = Config.query().get()
-    id = config.last_id
-    # id = 1251
+    # config = Config.query().get()
+    # id = config.last_id
+    id = 1251
 
     try:
         while True:
@@ -85,16 +88,20 @@ def _process_one(id):
         return
 
     comment = item
-    while item and item.get('type') == 'comment':
-        item = get_item(item['parent'])
+    top = top_level_cache.get(id)
+    if not top:
+        top = item
+        while top and top.get('type') == 'comment':
+            top = get_item(top['parent'])
+        top_level_cache[id] = top or NONE
 
-    if not item:
+    if top in (None, NONE):
         return
 
-    item.pop('kids', None)
-    logging.info(f'top level item {item["id"]} {item}')
-    url = item.get('url')
-    if item.get('type') != 'story' or not url:
+    top.pop('kids', None)
+    logging.info(f'top level item {top["id"]} {top}')
+    url = top.get('url')
+    if top.get('type') != 'story' or not url:
         return
 
     try:
@@ -111,19 +118,19 @@ def _process_one(id):
         logging.info('No webmention endpoint')
         return
 
-    source = source_url(id, item['id'])
-    target = resp.url
+    source = source_url(id, top['id'])
+    target = resp.url if resp else util.follow_redirects(url).url
     domain_str = util.domain_from_link(target)
 
-    logging.info(f'Storing Domain {domain_str} {endpoint}')
-    domain = Domain.get_or_insert(domain_str)
-    domain.endpoint = endpoint
-    domain.put()
+    if resp:
+        # discovered a new endpoint
+        logging.info(f'Storing Domain {domain_str} {endpoint}')
+        Domain(id=domain_str, endpoint=endpoint).put()
 
     logging.info(f'Sending webmention, {source} => {target}')
     wm = Webmention.get_or_insert(
         f'{source} {target}', source=source, target=target, comment_id=id,
-        story_id=item['id'])
+        story_id=top['id'])
 
     try:
         resp = webmention.send(endpoint, source, target)
