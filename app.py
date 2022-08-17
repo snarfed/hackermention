@@ -94,8 +94,10 @@ def _process_one(id):
         return
 
     item.pop('kids', None)
-    Item(id=id, json=json_dumps(item)).put()
     logging.info(f'{id}: {item}')
+
+    if item.get('url'):
+        Item(id=id, json=json_dumps(item)).put()
     if item.get('type') != 'comment':
         return
 
