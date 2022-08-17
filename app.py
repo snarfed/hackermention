@@ -25,6 +25,7 @@ HN_ITEM = 'https://news.ycombinator.com/item?id=%s'
 HN_USER = 'https://news.ycombinator.com/user?id=%s'
 
 top_level_cache = TTLCache(1_000_000, 60 * 60 * 24 * 365)  # 1y expiration
+story_url_cache = TTLCache(100_000, 60 * 60 * 24 * 365)  # 1y expiration
 NONE = 0
 
 util.set_user_agent('hackermention <https://hackermention.appspot.com/>')
@@ -63,7 +64,7 @@ def process():
 
     config = Config.query().get()
     id = config.last_id
-    # id = 1251
+    # id = 3277
 
     while True:
         if datetime.now() - start > DEADLINE:
@@ -80,7 +81,7 @@ def process():
                     },
                 })
 
-            return ''
+            return 'OK'
 
         _process_one(id)
         id += 1
@@ -129,14 +130,17 @@ def _process_one(id):
         return
 
     source = source_url(id, top['id'])
-    target = resp.url if resp else util.follow_redirects(url).url
-    domain_str = util.domain_from_link(target)
 
-    if resp:
+    if resp is None:
+        target = story_url_cache.get(top['id']) or util.follow_redirects(url).url
+    else:
         # discovered a new endpoint
+        target = resp.url
+        domain_str = util.domain_from_link(target)
         logging.info(f'Storing Domain {domain_str} {endpoint}')
         Domain(id=domain_str, endpoint=endpoint).put()
 
+    story_url_cache[top['id']] = target
     logging.info(f'Sending webmention, {source} => {target}')
     wm = Webmention.get_or_insert(
         f'{source} {target}', source=source, target=target, comment_id=id,
@@ -167,9 +171,12 @@ def item(id):
     comment_url = HN_ITEM % comment['id']
 
     story_id = request.values['story']
-    story = get_item(story_id)
-    if not story:
-        return 'No such story id', 404
+    story_url = story_url_cache.get(story_id)
+    if not story_url:
+        story = get_item(story_id)
+        if not story:
+            return 'No such story id', 404
+        story_url = util.follow_redirects(story['url']).url
 
     html = microformats2.object_to_html({
         'objectType': 'comment',
@@ -185,7 +192,7 @@ def item(id):
             {'url': source_url(comment['parent'], story_id)},
             {'url': HN_ITEM % comment['parent']},
             {'url': HN_ITEM % story_id},
-            {'url': story.get('url')},
+            {'url': story_url},
         ],
     })
     return f"""\
