@@ -1,9 +1,6 @@
 """
 TODO:
-cache:
-* comment id => top level id
-* top level id => url?
-follow redirects on target URLs before sending wms?
+check HN API max id
 """
 from datetime import datetime, timedelta
 import logging
@@ -14,7 +11,8 @@ from flask import abort, Flask, request
 from flask_caching import Cache
 from granary import microformats2
 from oauth_dropins.webutil import appengine_info, flask_util, util, webmention
-from oauth_dropins.webutil.appengine_config import ndb_client
+from oauth_dropins.webutil.appengine_config import ndb_client, tasks_client
+from oauth_dropins.webutil.appengine_info import APP_ID
 from oauth_dropins.webutil.util import json_dumps, json_loads
 from requests.exceptions import RequestException
 
@@ -59,7 +57,7 @@ def source_url(comment_id, story_id):
     return urllib.parse.urljoin(request.url, f'/item/{comment_id}?story={story_id}')
 
 
-@app.route('/_ah/process')
+@app.route('/_ah/process', methods=['POST'])
 def process():
     start = datetime.now()
 
@@ -72,6 +70,16 @@ def process():
             logging.info(f'hit {DEADLINE} deadline, shutting down')
             config.last_id = id
             config.put()
+
+            tasks_client.create_task(
+                parent=tasks_client.queue_path(APP_ID, 'us-central', 'default'),
+                task={
+                    'app_engine_http_request': {
+                        'http_method': 'POST',
+                        'relative_uri': '/_ah/process',
+                    },
+                })
+
             return ''
 
         _process_one(id)
@@ -83,9 +91,8 @@ def _process_one(id):
     if not item:
         return
 
-    Item(id=id, json=json_dumps(item)).put()
-
     item.pop('kids', None)
+    Item(id=id, json=json_dumps(item)).put()
     logging.info(f'{id}: {item}')
     if item.get('type') != 'comment':
         return

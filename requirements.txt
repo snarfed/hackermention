@@ -4,4 +4,5 @@ git+https://github.com/snarfed/oauth-dropins.git@webmention-cache#egg=oauth_drop
 Flask<3.0.0
 flask_caching
 google-cloud-ndb
+google-cloud-tasks
 gunicorn
