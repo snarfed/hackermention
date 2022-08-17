@@ -7,6 +7,7 @@ follow redirects on target URLs before sending wms?
 """
 import datetime
 import logging
+import signal
 import urllib.parse
 
 from cachetools import TTLCache
@@ -64,15 +65,17 @@ def process():
     # id = config.last_id
     id = 1251
 
-    try:
-        while True:
-            _process_one(id)
-            id += 1
-    except:
-        logging.info('died!', exc_info=True)
+    def cleanup():
+        logging.info('terminated!', exc_info=True)
         config.last_id = id
         config.put()
         return ''
+
+    signal.signal(signal.SIGTERM, cleanup)
+
+    while True:
+        _process_one(id)
+        id += 1
 
 
 def _process_one(id):
