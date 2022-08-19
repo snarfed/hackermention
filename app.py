@@ -4,6 +4,7 @@ check HN API max id
 """
 from datetime import datetime, timedelta
 import logging
+import time
 import urllib.parse
 
 from cachetools import TTLCache
@@ -46,12 +47,20 @@ cache = Cache(app)
 
 
 def get_item(id):
-    resp = util.requests_get(API_ITEM % id).json()
-    if resp.get('error') or resp.get('dead'):
-        logging.info(f'{id}: {resp}')
-        return None
+    for i in range(5):
+        try:
+            resp = util.requests_get(API_ITEM % id).json()
+            if resp.get('error') or resp.get('dead'):
+                logging.info(f'{id}: {resp}')
+                return None
+            return resp
+        except BaseException as e:
+            if not util.is_connection_failure(e):
+                raise
+            logging.info('Failed, retrying', exc_info=True)
+            time.sleep(i * 10)
 
-    return resp
+    raise RuntimeError('Giving up')
 
 
 def source_url(comment_id, story_id):
