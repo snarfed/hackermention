@@ -50,7 +50,7 @@ def get_item(id):
     for i in range(5):
         try:
             resp = util.requests_get(API_ITEM % id).json()
-            if resp.get('error') or resp.get('dead'):
+            if resp.get('error') or resp.get('dead') or resp.get('deleted'):
                 logging.info(f'{id}: {resp}')
                 return None
             return resp
@@ -72,9 +72,11 @@ def source_url(comment_id, story_id):
 def process():
     start = datetime.now()
 
-    config = Config.query().get()
-    id = config.last_id
-    # id = 9485
+    if appengine_info.DEBUG:
+        id = 9485
+    else:
+        config = Config.query().get()
+        id = config.last_id
 
     while True:
         if datetime.now() - start > DEADLINE:
