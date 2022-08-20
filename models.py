@@ -22,7 +22,7 @@ class Webmention(StringIdModel):
     updated = ndb.DateTimeProperty(auto_now=True, tzinfo=timezone.utc)
     comment_id = ndb.IntegerProperty(required=True)
     story_id = ndb.IntegerProperty(required=True)
-    status = ndb.StringProperty(choices=('complete','failed'))
+    status = ndb.StringProperty(choices=('complete', 'failed'))
 
 
 class Domain(StringIdModel):

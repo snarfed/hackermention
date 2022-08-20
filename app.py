@@ -95,20 +95,29 @@ def process():
 
             return 'OK'
 
-        _process_one(id)
+        item = get_item(id)
+        if not item:
+            continue
+
+        item.pop('kids', None)
+        logging.info(f'{id}: {item}')
+
+        if item.get('url'):
+            Item(id=id, json=json_dumps(item)).put()
+
+        process_submission(id, item)
         id += 1
 
 
-def _process_one(id):
-    item = get_item(id)
-    if not item:
+def process_submission(id, item):
+    url = item.get('url')
+    if not url:
         return
 
-    item.pop('kids', None)
-    logging.info(f'{id}: {item}')
+    send(HN_ITEM % id, url)
 
-    if item.get('url'):
-        Item(id=id, json=json_dumps(item)).put()
+
+def process_comment(id, item):
     if item.get('type') != 'comment':
         return
 
@@ -129,24 +138,25 @@ def _process_one(id):
     if top.get('type') != 'story' or not url:
         return
 
+    target = story_url_cache.get(top['id']) or util.follow_redirects(url).url
+    story_url_cache[top['id']] = target
+    send(source_url(id, top['id']), target, comment_id=id, story_id=top['id'])
+
+
+def send(source, target, **kwargs):
+    """kwargs are stored as properties on the Webmention entity."""
     try:
-        endpoint, resp = webmention.discover(url, cache=True)
+        endpoint, resp = webmention.discover(target, cache=True)
     except (ValueError, RequestException):
-        cache_key = webmention.endpoint_cache_key(url)
-        logging.info(f'endpoint discovery failed, caching NONE for {cache_key}',
-                     exc_info=True)
-        with webmention.endpoint_cache_lock:
-            webmention.endpoint_cache[cache_key] = webmention.NO_ENDPOINT
+        logging.info(f'endpoint discovery failed', exc_info=True)
         return
 
     if endpoint in (None, webmention.NO_ENDPOINT):
         logging.info('No webmention endpoint')
         return
 
-    source = source_url(id, top['id'])
-
     if resp is None:
-        target = story_url_cache.get(top['id']) or util.follow_redirects(url).url
+        target = util.follow_redirects(target).target
     else:
         # discovered a new endpoint
         target = resp.url
@@ -154,11 +164,9 @@ def _process_one(id):
         logging.info(f'Storing Domain {domain_str} {endpoint}')
         Domain(id=domain_str, endpoint=endpoint).put()
 
-    story_url_cache[top['id']] = target
     logging.info(f'Sending webmention, {source} => {target}')
     wm = Webmention.get_or_insert(
-        f'{source} {target}', source=source, target=target, comment_id=id,
-        story_id=top['id'])
+        f'{source} {target}', source=source, target=target, **kwargs)
 
     try:
         resp = webmention.send(endpoint, source, target)
