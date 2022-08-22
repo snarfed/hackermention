@@ -15,7 +15,7 @@ from oauth_dropins.webutil import util
 from oauth_dropins.webutil.webmention import discover
 from requests.exceptions import RequestException
 
-NUM_THREADS = 50
+NUM_THREADS = 500
 
 logging.basicConfig()
 logging.getLogger().setLevel(logging.DEBUG)
@@ -48,7 +48,7 @@ def discoverer():
                 util.is_connection_failure(e)):
                 endpoint = None
             else:
-                print('!!! Thread dying !!!')
+                print('!!! Thread dying !!!', file=sys.stderr)
                 raise
             logging.warning(target, exc_info=True)
 
@@ -73,7 +73,7 @@ def main():
     if outpath.exists():
         for row in csv.reader(open(outpath)):
             endpoints[row[0]] = row[1]
-        print(f'Loaded {len(endpoints)} existing endpoints from {args.output}')
+        print(f'Loaded {len(endpoints)} existing endpoints from {args.output}', flush=True)
     else:
         with open(outpath, 'a') as outf:
             outf.write('domain,endpoint\n')
