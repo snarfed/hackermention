@@ -35,27 +35,27 @@ def discoverer():
     while True:
         target = targets.get()
         domain = util.domain_from_link(target)
-        if not domain:
-            targets.task_done()
-            continue
+        with endpoints_lock:
+            if not domain or domain in endpoints:
+                targets.task_done()
+                continue
+            endpoints[domain] = None  # lease
 
-        if domain not in endpoints:
-            try:
-                endpoint, _ = discover(target)
-            except BaseException as e:
-                if (isinstance(e, (ValueError, RequestException)) or
-                    util.is_connection_failure(e)):
-                    endpoint = None
-                else:
-                    print('!!! Thread dying !!!')
-                    raise
-                logging.warning(target, exc_info=True)
+        try:
+            endpoint, _ = discover(target)
+        except BaseException as e:
+            if (isinstance(e, (ValueError, RequestException)) or
+                util.is_connection_failure(e)):
+                endpoint = None
+            else:
+                print('!!! Thread dying !!!')
+                raise
+            logging.warning(target, exc_info=True)
 
-            with endpoints_lock:
-                endpoints[domain] = endpoint
+        with endpoints_lock:
+            endpoints[domain] = endpoint
 
-            discovered.put((domain, endpoint))
-
+        discovered.put((domain, endpoint))
         targets.task_done()
 
 
