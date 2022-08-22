@@ -31,10 +31,12 @@ The [BigQuery archive](https://console.cloud.google.com/bigquery?p=bigquery-publ
 Files are [Zstandard-compressed](https://facebook.github.io/zstd/) [JSON Lines](https://jsonlines.org/), and must be decompressed with `zstd --long=31 ...`](https://files.pushshift.io/reddit/submissions/README.txt).
 
 ```sh
-zstd --long=31 -cd RS_2022-07.zst \
+zstd --long=31 -cd RS_2022-06.zst \
   | jq -j '"https://www.reddit.com", .permalink, ",", .url, "\n"' \
   | sed 's/\\&amp\\;/\\&/' \
   | grep -Ev ',https://([^.]+\.)?(redd\.it|reddit\.com)/' \
   | grep -Ev '\.(avi|gif|gifv|jpg|jpeg|mov|mp4|pdf|png)$' \
-  > RS_2022-07.csv
+  | ./discover.py -f ~/RS_2022-07.csv -o ~/endpoints.csv >discover.log 2>&1 &
 ```
+
+STATE: currently running RS_2022-06

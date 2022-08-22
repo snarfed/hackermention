@@ -84,9 +84,11 @@ def main():
         threading.Thread(target=discoverer, daemon=True).start()
 
     # enqueue new endpoints
-    with open(args.file, newline='') as f:
-        for _, target in csv.reader(f):
-            targets.put(target)
+    input = sys.stdin if args.file in (None, '-') else open(args.file, newline='')
+    with input as f:
+        for row in csv.reader(f):
+            if row:
+                targets.put(row[1])
 
     targets.join()
     discovered.join()
