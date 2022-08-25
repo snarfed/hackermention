@@ -26,8 +26,10 @@ util.set_user_agent('hackermention <https://hackermention.appspot.com/>')
 endpoints = {}  # maps domain to endpoint
 webmentions = queue.Queue()  # (source URL, target URL) tuples
 results = queue.Queue()      # (source URL, target URL, result string) tuples
+sent = set()                 # (source URL, target URL) tuples
 unseen = set()  # domains that aren't in endpoints file
 unseen_lock = threading.RLock()
+
 
 parser = argparse.ArgumentParser(description='Send webmentions.')
 parser.add_argument('--endpoints', '-e', help='webmention endpoints CSV with domain,endpoint URL')
@@ -98,10 +100,16 @@ def writer():
 
 def main():
     # read endpoints
+    global endpoints
     with open(args.endpoints) as f:
-        for domain, endpoint in csv.reader(f):
-            endpoints[domain] = endpoint
+        endpoints = dict(csv.reader(f))
     print(f'Loaded {len(endpoints)} existing endpoints from {args.endpoints}', flush=True)
+
+    # read already sent webmentions
+    with open(args.output) as f:
+        for src, target, _ in csv.reader(f):
+            sent.add((src, target))
+    print(f'Loaded {len(sent)} already sent webmentions from {args.output}', flush=True)
 
     # start worker threads
     threading.Thread(target=writer, daemon=True).start()
@@ -112,7 +120,9 @@ def main():
     input = sys.stdin if args.file in (None, '-') else open(args.file, newline='')
     with input as f:
         for row in csv.reader(f):
-            if row:
+            row = tuple(row)
+            if row and row not in sent:
+                sent.add(row)
                 webmentions.put(row)
 
     webmentions.join()
