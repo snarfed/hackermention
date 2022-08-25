@@ -2,6 +2,8 @@
 """Sends webmentions for a set of source and target URLs.
 
 https://webmention.net/draft/#sender-notifies-receiver
+
+TODO: skip Bridgy Reddit users
 """
 import argparse
 import csv
@@ -14,14 +16,18 @@ import threading
 from oauth_dropins.webutil import util, webmention
 from requests.exceptions import HTTPError
 
-NUM_THREADS = 1
+NUM_THREADS = 20
 
 logging.basicConfig()
 logging.getLogger().setLevel(logging.DEBUG)
 
+util.set_user_agent('hackermention <https://hackermention.appspot.com/>')
+
 endpoints = {}  # maps domain to endpoint
 webmentions = queue.Queue()  # (source URL, target URL) tuples
 results = queue.Queue()      # (source URL, target URL, result string) tuples
+unseen = set()  # domains that aren't in endpoints file
+unseen_lock = threading.RLock()
 
 parser = argparse.ArgumentParser(description='Send webmentions.')
 parser.add_argument('--endpoints', '-e', help='webmention endpoints CSV with domain,endpoint URL')
@@ -33,19 +39,22 @@ args = parser.parse_args()
 def sender():
     while True:
         row = webmentions.get()
-        # try:
-        source, target = row
-        # except:
-        #     print('@', row)
-        #     raise
+        try:
+            source, target = row
+        except ValueError:
+            logging.warning(f'target URL probably has quote: {row}', exc_info=True)
+            webmentions.task_done()
+            continue
+
         domain = util.domain_from_link(target)
 
         if domain not in endpoints:
-            if domain:
+            if domain and domain not in unseen:
+                with unseen_lock:
+                    unseen.add(domain)
                 print(f'{domain} not in endpoints file!', file=sys.stderr)
             webmentions.task_done()
             continue
-            # sys.exit(1)
 
         endpoint = endpoints[domain]
         if not endpoint:
@@ -54,21 +63,22 @@ def sender():
 
         try:
             resp = webmention.send(endpoint, source, target)
-            result = f'HTTP {resp.status_code} {resp.text} {resp.headers.get("Location", "")}'
+            body = resp.text.replace('\n')[:500]
+            result = f'HTTP {resp.status_code} {body} {resp.headers.get("Location", "")}'
         except ValueError as e:
             result = f'bad URL: {e}'
         except HTTPError as e:
             status = e.response.status_code
-            result = f'HTTP {status} {e.response.text} {e.response.headers.get("Location", "")}'
+            body = e.response.text.replace('\n')[:500]
+            result = f'HTTP {status} {body} {e.response.headers.get("Location", "")}'
         except BaseException as e:
             if util.is_connection_failure(e):
                 result = f'connection failed: {e}'
             else:
                 print('!!! Thread dying !!!', file=sys.stderr)
                 raise
-        finally:
-            logging.warning(webmention, exc_info=True)
 
+        logging.info(result)
         results.put((source, target, result))
         webmentions.task_done()
 
@@ -81,7 +91,6 @@ def writer():
 
     with open(out, 'a', newline='', buffering=1) as f:
         writer = csv.writer(f, dialect=csv.unix_dialect)
-        writer.writerow(('source', 'target', 'result'))
         while True:
             writer.writerow(results.get())
             results.task_done()

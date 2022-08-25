@@ -4,6 +4,12 @@ Universal [webmention](https://webmention.net/) [backfeed](https://indieweb.org/
 
 This project is placed into the public domain.
 
+TODO:
+remove dupes from results.reddit.csv
+remove false positives from endpoints.csv
+  hostnames with no TLDs
+  *.pls (getkarma)
+  ...?
 
 # Projects
 
@@ -18,11 +24,36 @@ TODO
 `send.py` reads a CSV of `source,target` URLs from stdin and attempts to send a webmention for each pair. It writes the results as a `source,target,result` CSV.
 
 
-## Extractors
+## Sites
 
 ### Hacker News
 
 The [BigQuery archive](https://console.cloud.google.com/bigquery?p=bigquery-public-data&d=hacker_news&page=dataset) is based on the [Hacker News Firebase API](https://github.com/HackerNews/API).
+
+First, query the [BigQuery dataset](https://console.cloud.google.com/bigquery?p=bigquery-public-data&d=hacker_news&page=dataset) for story URLs:
+
+```sql
+#standardSQL
+SELECT stories.id, stories.url
+FROM `bigquery-public-data.hacker_news.stories` AS stories
+WHERE stories.url IS NOT NULL
+```
+
+Download the results as CSV to Google Drive, then download locally, then run this to convert the ids to URLs:
+
+```sh
+sed -i'' -e 's/^[0-9]/https:\/\/news.ycombinator.com\/item\?id=&/' [filename]
+```
+
+Then, run `discover.py`
+
+```sh
+./discover.py -o ~/endpoints.csv -f ~/hn_wms.csv >hn_wms.log 2>&1
+
+./send.py -e ~/endpoints.csv -o ~/results.hn.csv -f ~/hn_wms.csv >results.hn.log 2>&1
+```
+
+
 
 ### Reddit
 
@@ -40,12 +71,10 @@ zstd --long=31 -cd RS_2022-06.zst \
   | ./discover.py -o ~/endpoints.csv >discover.log 2>&1 &
 
 # send webmentions
-zstd --long=31 -cd RS_2022-06.zst \
+zstd --long=31 -cd ~/RS_2022-07.zst \
   | jq -j '"https://www.reddit.com", .permalink, ",\"", .url, "\"\n"' \
   | sed 's/\\&amp\\;/\\&/' \
   | grep -Ev ',https://([^.]+\.)?(redd\.it|reddit\.com)/' \
   | grep -Ev '\.(avi|gif|gifv|jpg|jpeg|mov|mp4|pdf|png)$' \
-  | ./send.py -e ~/endpoints.csv -o ~/results.csv >send.log 2>&1 &
+  | ./send.py -e ~/endpoints.csv -o ~/results.csv
 ```
-
-STATE: currently running RS_2022-04

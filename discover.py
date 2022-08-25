@@ -20,6 +20,8 @@ NUM_THREADS = 500
 logging.basicConfig()
 logging.getLogger().setLevel(logging.DEBUG)
 
+util.set_user_agent('hackermention <https://hackermention.appspot.com/>')
+
 endpoints = {}  # maps domain to endpoint
 endpoints_lock = threading.RLock()
 targets = queue.Queue()     # target URLs
