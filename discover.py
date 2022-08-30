@@ -19,29 +19,26 @@ NUM_THREADS = 500
 
 logging.basicConfig()
 logging.getLogger().setLevel(logging.DEBUG)
-
+csv.field_size_limit(sys.maxsize)
 util.set_user_agent('hackermention <https://hackermention.appspot.com/>')
 
 endpoints = {}  # maps domain to endpoint
 endpoints_lock = threading.RLock()
-targets = queue.Queue()     # target URLs
+targets = queue.Queue(1000000)  # target URLs
 discovered = queue.Queue()  # (domain, endpoint) tuples
 
-parser = argparse.ArgumentParser(description='Discover webmention endpoints.')
-parser.add_argument('--file', '-f', help='input CSV with source,target URLs')
-parser.add_argument('--output', '-o', help='output CSV with domain,endpoint')
-args = parser.parse_args()
+args = None  # populated in main()
+
+BLOCKLIST = (
+    'anus.io',     # response body continues forever, connection never closes
+    'robpike.io',  # same
+    '.pls',        # not a real TLD, but shows up in getkarma.*.*.pls URLs
+)
 
 
 def discoverer():
     while True:
-        target = targets.get()
-        domain = util.domain_from_link(target)
-        with endpoints_lock:
-            if not domain or domain in endpoints:
-                targets.task_done()
-                continue
-            endpoints[domain] = None  # lease
+        target, domain = targets.get()
 
         try:
             endpoint, _ = discover(target)
@@ -70,6 +67,12 @@ def writer():
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Discover webmention endpoints.')
+    parser.add_argument('--file', '-f', help='input CSV with source,target URLs')
+    parser.add_argument('--output', '-o', help='output CSV with domain,endpoint')
+    global args
+    args = parser.parse_args()
+
     # read existing endpoints, if any
     outpath = Path(args.output)
     if outpath.exists():
@@ -89,8 +92,16 @@ def main():
     input = sys.stdin if args.file in (None, '-') else open(args.file, newline='')
     with input as f:
         for row in csv.reader(f):
-            if row:
-                targets.put(row[1])
+            if row and len(row) >= 2:
+                target = row[1]
+                domain = util.domain_from_link(target)
+                with endpoints_lock:
+                    if (not domain or domain in endpoints or
+                        util.domain_or_parent_in(domain, BLOCKLIST)):
+                        continue
+                    endpoints[domain] = None  # lease
+
+                targets.put((target, domain))
 
     targets.join()
     discovered.join()

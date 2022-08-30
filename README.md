@@ -5,11 +5,13 @@ Universal [webmention](https://webmention.net/) [backfeed](https://indieweb.org/
 This project is placed into the public domain.
 
 TODO:
-remove dupes from results.reddit.csv
-remove false positives from endpoints.csv
-  hostnames with no TLDs
-  *.pls (getkarma)
-  ...?
+* Indie Map domains
+* find false negatives
+  * eg tantek.com, *.micro.blog
+* remove false positives from endpoints.csv
+  * hostnames with no TLDs
+  * ...?
+* HN 2016-present (BQ only has 2006-2016)
 
 # Projects
 
@@ -53,7 +55,10 @@ Then, run `discover.py`
 ./send.py -e ~/endpoints.csv -o ~/results.hn.csv -f ~/hn_wms.csv >results.hn.log 2>&1
 ```
 
-
+Stats:
+* 2006 - 2016
+* 1_840_154 posts
+* 207_441_982 bytes
 
 ### Reddit
 
@@ -63,18 +68,51 @@ Files are [Zstandard-compressed](https://facebook.github.io/zstd/) [JSON Lines](
 
 ```sh
 # discover endpoints
-zstd --long=31 -cd RS_2022-06.zst \
+zstd --long=31 -cd RS_*.zst \
   | jq -j '"https://www.reddit.com", .permalink, ",\"", .url, "\"\n"' \
+  | tr -d '\000' \
   | sed 's/\\&amp\\;/\\&/' \
   | grep -Ev ',https://([^.]+\.)?(redd\.it|reddit\.com)/' \
   | grep -Ev '\.(avi|gif|gifv|jpg|jpeg|mov|mp4|pdf|png)$' \
   | ./discover.py -o ~/endpoints.csv >discover.log 2>&1 &
 
 # send webmentions
-zstd --long=31 -cd ~/RS_2022-07.zst \
+zstd --long=31 -cd RS_*.zst \
   | jq -j '"https://www.reddit.com", .permalink, ",\"", .url, "\"\n"' \
+  | tr -d '\000' \
   | sed 's/\\&amp\\;/\\&/' \
   | grep -Ev ',https://([^.]+\.)?(redd\.it|reddit\.com)/' \
   | grep -Ev '\.(avi|gif|gifv|jpg|jpeg|mov|mp4|pdf|png)$' \
-  | ./send.py -e ~/endpoints.csv -o ~/results.csv
+  | ./send.py -e ~/endpoints.csv -o ~/results.reddit.csv
+```
+
+Stats:
+
+* 6/2005 - 7/2022
+* 193 months
+* 3_836_796_818_274 bytes
+* 1_344_306_994 submissions (posts)
+
+### Bridgy
+
+Query the [BigQuery dataset](https://console.cloud.google.com/bigquery?ws=%211m5%211m4%214m3%211sbrid-gy%212sdatastore%213sResponse) for `Response.sent` URLs:
+
+```sql
+#standardSQL
+SELECT '', s
+from `brid-gy.datastore.Response` r, r.sent s
+```
+
+Then download the results as CSV locally.
+
+### Indie Map
+
+TODO
+
+### IndieWeb wiki chat-names and users
+
+Download [https://indieweb.org/chat-names](https://indieweb.org/chat-names), remove header and footer HTML around list of links, then run this to extract URLs:
+
+```sh
+grep -E -o 'href="http[^"]+' chat-names.html | cut -c 7-
 ```
